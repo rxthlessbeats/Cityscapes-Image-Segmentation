@@ -1,4 +1,5 @@
 # Training hyperparameters (loaded by TrainConfig)
+model_name: fcn8s          # registered model name (see model.py MODEL_REGISTRY)
 img_height: 256
 img_width: 512
 batch_size: 4

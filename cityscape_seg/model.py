@@ -11,7 +11,12 @@ for Semantic Segmentation" (CVPR 2015):
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import torch.nn as nn
+
+if TYPE_CHECKING:
+    from .config import TrainConfig
 
 
 class ConvBlock(nn.Module):
@@ -120,3 +125,17 @@ class FCN8s(nn.Module):
 
         out = self.up_final(fuse2)
         return out
+
+
+# ---------------------------------------------------------------------------
+# Model registry -- add new models here
+# ---------------------------------------------------------------------------
+MODEL_REGISTRY: dict[str, type[nn.Module]] = {
+    "fcn8s": FCN8s,
+}
+
+
+def build_model(config: TrainConfig) -> nn.Module:
+    """Instantiate the model specified by ``config.model_name``."""
+    cls = MODEL_REGISTRY[config.model_name]
+    return cls(config.num_classes)

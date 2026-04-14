@@ -10,9 +10,13 @@ cityscape_seg/
   config.yaml           # training hyperparameters
   requirements.txt      # Python dependencies
   data/                 # dataset (not tracked in git)
-    small_data/
+    gtFine/             # raw Cityscapes annotations
+    leftImg8bit/        # raw Cityscapes images
+    small_data/         # flattened split used for training
       train/
       valid/
+      test/
+    create_data.ipynb   # script to build small_data/ from the raw downloads
   cityscape_seg/        # Python package
     config.py           # Pydantic Settings + TrainConfig
     labels.py           # class names, colours, label remap table
@@ -47,7 +51,37 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Configure environment
+### 3. Prepare the dataset
+
+The model trains on a flattened version of Cityscapes stored under `data/small_data/`.
+A notebook at `data/create_data.ipynb` automates this.
+
+1. Download the two Cityscapes archives (requires a free account at [cityscapes-dataset.com](https://www.cityscapes-dataset.com/)):
+   - **gtFine** (annotations): [packageID=1](https://www.cityscapes-dataset.com/file-handling/?packageID=1)
+   - **leftImg8bit** (images): [packageID=3](https://www.cityscapes-dataset.com/file-handling/?packageID=3)
+2. Extract them so the `data/` folder looks like this:
+   ```
+   data/
+     gtFine/
+       train/
+       val/
+       test/
+     leftImg8bit/
+       train/
+       val/
+       test/
+   ```
+3. Open `data/create_data.ipynb` and run all cells. It copies `*_labelIds.png` and `*_leftImg8bit.png` files from every city into flat directories:
+   ```
+   data/small_data/
+     train/    (all training cities)
+     valid/    (all validation cities)
+     test/     (all test cities)
+   ```
+
+After this step, `data/small_data/` is ready and the training pipeline can load it.
+
+### 4. Configure environment
 
 Edit `.env` to match your machine:
 
@@ -58,7 +92,7 @@ CITYSEG_NUM_WORKERS=0
 CITYSEG_PIN_MEMORY=true
 ```
 
-### 4. Configure training
+### 5. Configure training
 
 Edit `config.yaml` to adjust hyperparameters:
 
@@ -96,6 +130,21 @@ python -m cityscape_seg train --config my_config.yaml
 ### Use the notebook
 
 Open `notebooks/base.ipynb` in Jupyter or VS Code. The first cell adds the project root to `sys.path` so all package imports work without installation.
+
+### View TensorBoard logs
+
+Each training run (both CLI and notebook) automatically logs metrics to TensorBoard under the `runs/` directory. To launch the dashboard:
+
+```bash
+tensorboard --logdir runs
+```
+
+**What gets logged:**
+
+- **Per-epoch scalars** -- train/val loss, train/val accuracy, learning rate
+- **Per-class IoU and mIoU** -- logged at the end of training
+- **Prediction images** -- input / ground-truth / prediction grid
+- **Hyperparameters** -- batch size, lr, weight decay, loss type, etc. (viewable in the HParams tab for comparing runs)
 
 ## 8-Class Label Scheme
 

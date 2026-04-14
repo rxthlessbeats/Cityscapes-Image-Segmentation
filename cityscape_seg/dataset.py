@@ -11,15 +11,19 @@ import torchvision.transforms.functional as TF
 from PIL import Image
 from skimage.segmentation import find_boundaries
 from torch.utils.data import Dataset
+from tqdm import tqdm
 
 from .labels import build_label_remap
 
 
 class CityscapesSegDataset(Dataset):
-    """Loads all Cityscapes images + labels into memory as resized PIL images.
+    """Loads Cityscapes images + labels into memory as resized PIL images.
 
     Augmentation transforms are applied lazily in ``__getitem__`` so that each
     epoch sees different random variations of the training data.
+
+    If ``max_samples`` is set, only that many randomly chosen pairs are loaded
+    (controlled by ``seed`` for reproducibility), saving both time and memory.
     """
 
     def __init__(
@@ -28,6 +32,8 @@ class CityscapesSegDataset(Dataset):
         split: str = "train",
         img_size: tuple[int, int] = (256, 512),
         transform=None,
+        max_samples: int | None = None,
+        seed: int = 42,
     ) -> None:
         split_dir = os.path.join(root_dir, split)
         if not os.path.isdir(split_dir):
@@ -42,12 +48,17 @@ class CityscapesSegDataset(Dataset):
         assert len(image_paths) == len(label_paths), (
             f"Mismatch: {len(image_paths)} images vs {len(label_paths)} labels"
         )
-        n = len(image_paths)
-        print(f"[{split}] Loading {n} image-label pairs into memory …")
+
+        pairs = list(zip(image_paths, label_paths))
+
+        if max_samples is not None and max_samples < len(pairs):
+            rng = np.random.default_rng(seed)
+            indices = rng.choice(len(pairs), size=max_samples, replace=False)
+            pairs = [pairs[i] for i in sorted(indices)]
 
         self.images: list[Image.Image] = []
         self.labels: list[Image.Image] = []
-        for i, (ip, lp) in enumerate(zip(image_paths, label_paths)):
+        for ip, lp in tqdm(pairs, desc=f"Loading [{split}]", unit="img"):
             img = Image.open(ip).convert("RGB")
             lbl = Image.open(lp)
 
@@ -56,11 +67,6 @@ class CityscapesSegDataset(Dataset):
 
             self.images.append(img)
             self.labels.append(lbl)
-
-            if (i + 1) % 500 == 0 or (i + 1) == n:
-                print(f"  {i + 1}/{n}")
-
-        print(f"[{split}] Done — {n} PIL image-label pairs loaded.")
 
     def __len__(self) -> int:
         return len(self.images)

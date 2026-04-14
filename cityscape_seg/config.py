@@ -19,11 +19,13 @@ class Settings(BaseSettings):
     device: str = "cuda"
     num_workers: int = 0
     pin_memory: bool = True
+    log_dir: str = "runs"
 
 
 class TrainConfig(BaseModel):
     """Training hyperparameters with validation."""
 
+    model_name: str = "fcn8s"
     img_height: int = Field(256, gt=0)
     img_width: int = Field(512, gt=0)
     batch_size: int = Field(4, gt=0)
@@ -36,6 +38,16 @@ class TrainConfig(BaseModel):
     seed: int = 42
     loss_type: Literal["cross_entropy", "focal"] = "cross_entropy"
     focal_gamma: float = Field(2.0, ge=0)
+
+    @field_validator("model_name")
+    @classmethod
+    def _validate_model_name(cls, v: str) -> str:
+        from .model import MODEL_REGISTRY
+        v = v.lower()
+        if v not in MODEL_REGISTRY:
+            allowed = ", ".join(sorted(MODEL_REGISTRY))
+            raise ValueError(f"Unknown model '{v}'. Choose from: {allowed}")
+        return v
 
     @field_validator("loss_type")
     @classmethod
