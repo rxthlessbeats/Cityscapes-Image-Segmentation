@@ -5,25 +5,25 @@ from __future__ import annotations
 import numpy as np
 
 CLASS_NAMES: list[str] = [
-    "road/drivable",   # 0
-    "sidewalk",        # 1
-    "human",           # 2
-    "vehicle",         # 3
+    "road/drivable",  # 0
+    "sidewalk",  # 1
+    "human",  # 2
+    "vehicle",  # 3
     "traffic object",  # 4
-    "nature",          # 5  (vegetation, terrain, sky)
-    "construction",    # 6  (building, wall, fence, guard rail, bridge, tunnel)
-    "background",      # 7  (void classes)
+    "nature",  # 5  (vegetation, terrain, sky)
+    "construction",  # 6  (building, wall, fence, guard rail, bridge, tunnel)
+    "background",  # 7  (void classes)
 ]
 
 CLASS_COLORS: list[tuple[int, int, int]] = [
-    (128, 64, 128),   # road – purple
-    (244, 35, 232),   # sidewalk – pink
-    (220, 20, 60),    # human – crimson
-    (0, 0, 142),      # vehicle – dark blue
-    (250, 170, 30),   # traffic object – orange
-    (107, 142, 35),   # nature – olive green
-    (70, 70, 70),     # construction – dark gray
-    (0, 0, 0),        # background – black
+    (128, 64, 128),  # road – purple
+    (244, 35, 232),  # sidewalk – pink
+    (220, 20, 60),  # human – crimson
+    (0, 0, 142),  # vehicle – dark blue
+    (250, 170, 30),  # traffic object – orange
+    (107, 142, 35),  # nature – olive green
+    (70, 70, 70),  # construction – dark gray
+    (0, 0, 0),  # background – black
 ]
 
 NUM_CLASSES = len(CLASS_NAMES)

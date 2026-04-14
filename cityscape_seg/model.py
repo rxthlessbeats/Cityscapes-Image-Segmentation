@@ -64,17 +64,29 @@ class FCN8s(nn.Module):
         self.score_bridge = nn.Conv2d(1024, num_classes, 1)
 
         self.up_bridge = nn.ConvTranspose2d(
-            num_classes, num_classes, 4, stride=2, padding=1,
+            num_classes,
+            num_classes,
+            4,
+            stride=2,
+            padding=1,
         )
         self.score_pool4 = nn.Conv2d(512, num_classes, 1)
 
         self.up_pool4 = nn.ConvTranspose2d(
-            num_classes, num_classes, 4, stride=2, padding=1,
+            num_classes,
+            num_classes,
+            4,
+            stride=2,
+            padding=1,
         )
         self.score_pool3 = nn.Conv2d(256, num_classes, 1)
 
         self.up_final = nn.ConvTranspose2d(
-            num_classes, num_classes, 16, stride=8, padding=4,
+            num_classes,
+            num_classes,
+            16,
+            stride=8,
+            padding=4,
         )
 
         self._init_weights()
@@ -102,10 +114,10 @@ class FCN8s(nn.Module):
         p2 = self.pool(e2)
 
         e3 = self.enc3(p2)
-        p3 = self.pool(e3)           # pool3 skip
+        p3 = self.pool(e3)  # pool3 skip
 
         e4 = self.enc4(p3)
-        p4 = self.pool(e4)           # pool4 skip
+        p4 = self.pool(e4)  # pool4 skip
 
         e5 = self.enc5(p4)
         p5 = self.pool(e5)

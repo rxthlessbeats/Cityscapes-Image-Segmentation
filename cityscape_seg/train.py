@@ -16,8 +16,8 @@ from tqdm import tqdm
 
 from .config import Settings, TrainConfig
 from .dataset import CityscapesSegDataset
-from .evaluate import compute_miou, print_miou_report, visualize_predictions
-from .labels import CLASS_NAMES, NUM_CLASSES
+from .evaluate import compute_miou, print_miou_report
+from .labels import CLASS_NAMES
 from .loss import build_criterion
 from .model import build_model
 from .transforms import build_train_transform, build_val_transform
@@ -38,11 +38,7 @@ def train_one_epoch(
         imgs, lbls, masks = imgs.to(device), lbls.to(device), masks.to(device)
         optimizer.zero_grad()
         out = model(imgs)
-        loss = (
-            criterion(out, lbls, masks)
-            if loss_type == "focal"
-            else criterion(out, lbls)
-        )
+        loss = criterion(out, lbls, masks) if loss_type == "focal" else criterion(out, lbls)
         loss.backward()
         optimizer.step()
 
@@ -68,11 +64,7 @@ def validate(
         for imgs, lbls, masks in tqdm(loader, desc="Val  ", leave=False):
             imgs, lbls, masks = imgs.to(device), lbls.to(device), masks.to(device)
             out = model(imgs)
-            loss = (
-                criterion(out, lbls, masks)
-                if loss_type == "focal"
-                else criterion(out, lbls)
-            )
+            loss = criterion(out, lbls, masks) if loss_type == "focal" else criterion(out, lbls)
             running_loss += loss.item() * imgs.size(0)
             preds = out.argmax(dim=1)
             correct += (preds == lbls).sum().item()
@@ -111,16 +103,13 @@ def _log_predictions(
 ) -> None:
     """Log input / ground-truth / prediction grids to TensorBoard."""
     model.eval()
-    fig, axes = plt.subplots(num_samples, 3, figsize=(16, 14))
+    fig, axes = plt.subplots(num_samples, 3, figsize=(8, 7))
     col_titles = ["Input", "Ground Truth", "Prediction"]
 
     for i in range(num_samples):
         img, lbl, _ = dataset[i]
         with torch.no_grad():
-            pred = (
-                model(img.unsqueeze(0).to(device))
-                .argmax(dim=1).squeeze(0).cpu().numpy()
-            )
+            pred = model(img.unsqueeze(0).to(device)).argmax(dim=1).squeeze(0).cpu().numpy()
         img_vis = inv_normalize(img).permute(1, 2, 0).clamp(0, 1).numpy()
         gt_vis = label_to_color(lbl.numpy())
         pred_vis = label_to_color(pred)
@@ -149,23 +138,35 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
 
     # Datasets (only load the number of samples we actually need)
     train_ds = CityscapesSegDataset(
-        settings.data_root, "train",
-        img_size=config.img_size, transform=train_transform,
-        max_samples=config.num_train, seed=config.seed,
+        settings.data_root,
+        "train",
+        img_size=config.img_size,
+        transform=train_transform,
+        max_samples=config.num_train,
+        seed=config.seed,
     )
     val_ds = CityscapesSegDataset(
-        settings.data_root, "valid",
-        img_size=config.img_size, transform=val_transform,
-        max_samples=config.num_val, seed=config.seed,
+        settings.data_root,
+        "valid",
+        img_size=config.img_size,
+        transform=val_transform,
+        max_samples=config.num_val,
+        seed=config.seed,
     )
 
     train_loader = DataLoader(
-        train_ds, batch_size=config.batch_size, shuffle=True,
-        num_workers=settings.num_workers, pin_memory=settings.pin_memory,
+        train_ds,
+        batch_size=config.batch_size,
+        shuffle=True,
+        num_workers=settings.num_workers,
+        pin_memory=settings.pin_memory,
     )
     val_loader = DataLoader(
-        val_ds, batch_size=config.batch_size, shuffle=False,
-        num_workers=settings.num_workers, pin_memory=settings.pin_memory,
+        val_ds,
+        batch_size=config.batch_size,
+        shuffle=False,
+        num_workers=settings.num_workers,
+        pin_memory=settings.pin_memory,
     )
 
     print(f"Train: {len(train_ds)} samples  ({len(train_loader)} batches)")
@@ -186,7 +187,9 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
     print(f"\n{config.model_name}  |  Total params: {total_p:,}  |  Trainable: {trainable_p:,}")
 
     optimizer = optim.Adam(
-        model.parameters(), lr=config.lr, weight_decay=config.weight_decay,
+        model.parameters(),
+        lr=config.lr,
+        weight_decay=config.weight_decay,
     )
 
     # TensorBoard
@@ -202,10 +205,19 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
     epoch_bar = tqdm(range(1, config.num_epochs + 1), desc="Epochs")
     for epoch in epoch_bar:
         t_loss, t_acc = train_one_epoch(
-            model, train_loader, criterion, optimizer, device, config.loss_type,
+            model,
+            train_loader,
+            criterion,
+            optimizer,
+            device,
+            config.loss_type,
         )
         v_loss, v_acc = validate(
-            model, val_loader, criterion, device, config.loss_type,
+            model,
+            val_loader,
+            criterion,
+            device,
+            config.loss_type,
         )
 
         train_losses.append(t_loss)
@@ -218,8 +230,10 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
         writer.add_scalar("LR", optimizer.param_groups[0]["lr"], epoch)
 
         epoch_bar.set_postfix(
-            t_loss=f"{t_loss:.4f}", t_acc=f"{t_acc:.4f}",
-            v_loss=f"{v_loss:.4f}", v_acc=f"{v_acc:.4f}",
+            t_loss=f"{t_loss:.4f}",
+            t_acc=f"{t_acc:.4f}",
+            v_loss=f"{v_loss:.4f}",
+            v_acc=f"{v_acc:.4f}",
         )
 
     print("\nTraining complete.")

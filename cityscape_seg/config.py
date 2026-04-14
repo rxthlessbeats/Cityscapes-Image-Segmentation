@@ -43,6 +43,7 @@ class TrainConfig(BaseModel):
     @classmethod
     def _validate_model_name(cls, v: str) -> str:
         from .model import MODEL_REGISTRY
+
         v = v.lower()
         if v not in MODEL_REGISTRY:
             allowed = ", ".join(sorted(MODEL_REGISTRY))

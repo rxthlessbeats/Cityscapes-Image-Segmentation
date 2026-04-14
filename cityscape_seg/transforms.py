@@ -53,11 +53,21 @@ class PairedRandomResizedCrop:
     def __call__(self, image, target):
         i, j, h, w = T.RandomResizedCrop.get_params(image, self.scale, self.ratio)
         image = TF.resized_crop(
-            image, i, j, h, w, self.size,
+            image,
+            i,
+            j,
+            h,
+            w,
+            self.size,
             interpolation=TF.InterpolationMode.BILINEAR,
         )
         target = TF.resized_crop(
-            target, i, j, h, w, self.size,
+            target,
+            i,
+            j,
+            h,
+            w,
+            self.size,
             interpolation=TF.InterpolationMode.NEAREST,
         )
         return image, target
@@ -83,16 +93,21 @@ class PairedToTensorAndNormalize:
 # Factory helpers
 # ---------------------------------------------------------------------------
 
+
 def build_train_transform(config: TrainConfig) -> PairedCompose:
-    return PairedCompose([
-        PairedRandomHorizontalFlip(p=0.5),
-        PairedColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
-        PairedRandomResizedCrop(size=config.img_size, scale=(0.5, 1.0)),
-        PairedToTensorAndNormalize(),
-    ])
+    return PairedCompose(
+        [
+            PairedRandomHorizontalFlip(p=0.5),
+            PairedColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
+            PairedRandomResizedCrop(size=config.img_size, scale=(0.5, 1.0)),
+            PairedToTensorAndNormalize(),
+        ]
+    )
 
 
 def build_val_transform() -> PairedCompose:
-    return PairedCompose([
-        PairedToTensorAndNormalize(),
-    ])
+    return PairedCompose(
+        [
+            PairedToTensorAndNormalize(),
+        ]
+    )

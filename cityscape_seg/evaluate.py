@@ -28,7 +28,8 @@ def compute_miou(
             p_flat = preds.view(-1)
             indices = t_flat * num_classes + p_flat
             confusion += torch.bincount(
-                indices, minlength=num_classes**2,
+                indices,
+                minlength=num_classes**2,
             ).reshape(num_classes, num_classes)
 
     ious: list[float] = []
@@ -65,13 +66,7 @@ def visualize_predictions(
     for i in range(num_samples):
         img, lbl, _ = dataset[i]
         with torch.no_grad():
-            pred = (
-                model(img.unsqueeze(0).to(device))
-                .argmax(dim=1)
-                .squeeze(0)
-                .cpu()
-                .numpy()
-            )
+            pred = model(img.unsqueeze(0).to(device)).argmax(dim=1).squeeze(0).cpu().numpy()
 
         img_vis = inv_normalize(img).permute(1, 2, 0).clamp(0, 1).numpy()
         gt_vis = label_to_color(lbl.numpy())
@@ -87,8 +82,7 @@ def visualize_predictions(
                 axes[i, j].set_title(col_titles[j], fontsize=13)
 
     patches = [
-        mpatches.Patch(color=np.array(c) / 255, label=n)
-        for c, n in zip(CLASS_COLORS, CLASS_NAMES)
+        mpatches.Patch(color=np.array(c) / 255, label=n) for c, n in zip(CLASS_COLORS, CLASS_NAMES)
     ]
     num_classes = len(CLASS_NAMES)
     fig.legend(handles=patches, loc="lower center", ncol=num_classes, fontsize=10)

@@ -7,7 +7,9 @@ FCN-8s semantic segmentation on the Cityscapes dataset, with an 8-class label sc
 ```
 cityscape_seg/
   .env                  # machine / environment settings (data path, device, workers)
+  .pre-commit-config.yaml  # pre-commit hook definitions
   config.yaml           # training hyperparameters
+  pyproject.toml        # ruff & mypy configuration
   requirements.txt      # Python dependencies
   data/                 # dataset (not tracked in git)
     gtFine/             # raw Cityscapes annotations
@@ -109,6 +111,27 @@ num_val: 100
 seed: 42
 loss_type: cross_entropy   # or "focal"
 focal_gamma: 2.0
+```
+
+### 6. Set up pre-commit hooks (recommended)
+
+The project uses [pre-commit](https://pre-commit.com/) to run linting and formatting checks automatically on every commit.
+
+```bash
+pre-commit install
+```
+
+This registers hooks for (Only need to do this for once):
+
+- **Ruff** -- linting and auto-formatting
+- **mypy** -- static type checking
+- **Trailing whitespace / end-of-file fixer**
+- **YAML / TOML syntax check**
+
+To run all hooks manually against the entire codebase:
+
+```bash
+pre-commit run --all-files
 ```
 
 ## Usage

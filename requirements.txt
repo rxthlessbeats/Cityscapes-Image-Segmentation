@@ -9,3 +9,4 @@ pydantic-settings>=2.0
 pyyaml
 tqdm
 tensorboard
+pre-commit

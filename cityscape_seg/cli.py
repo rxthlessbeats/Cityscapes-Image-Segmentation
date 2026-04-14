@@ -30,7 +30,8 @@ def main(argv: list[str] | None = None) -> None:
 
     train_p = sub.add_parser("train", help="Run training")
     train_p.add_argument(
-        "--config", default="config.yaml",
+        "--config",
+        default="config.yaml",
         help="Path to YAML config file (default: config.yaml)",
     )
 
