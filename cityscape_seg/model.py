@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import torch
 import torch.nn as nn
 
 if TYPE_CHECKING:
@@ -36,6 +37,8 @@ class ConvBlock(nn.Module):
 
 
 class FCN8s(nn.Module):
+    """FCN-8s (Long et al., 2015) built from scratch."""
+
     def __init__(self, num_classes: int) -> None:
         super().__init__()
 
@@ -94,11 +97,11 @@ class FCN8s(nn.Module):
     def _init_weights(self) -> None:
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, nonlinearity="relu")
+                nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
             elif isinstance(m, nn.ConvTranspose2d):
-                nn.init.kaiming_normal_(m.weight, nonlinearity="relu")
+                nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
             elif isinstance(m, nn.BatchNorm2d):
@@ -139,11 +142,73 @@ class FCN8s(nn.Module):
         return out
 
 
+class UNet(nn.Module):
+    """U-Net (Ronneberger et al., 2015) for semantic segmentation.
+
+    Symmetric encoder-decoder with skip connections via concatenation.
+    """
+
+    def __init__(self, num_classes: int, base_ch: int = 32) -> None:
+        super().__init__()
+
+        self.enc1 = ConvBlock(3, base_ch)
+        self.enc2 = ConvBlock(base_ch, base_ch * 2)
+        self.enc3 = ConvBlock(base_ch * 2, base_ch * 4)
+        self.enc4 = ConvBlock(base_ch * 4, base_ch * 8)
+
+        self.pool = nn.MaxPool2d(2)
+
+        self.bottleneck = ConvBlock(base_ch * 8, base_ch * 16)
+
+        self.up4 = nn.ConvTranspose2d(base_ch * 16, base_ch * 8, 2, stride=2)
+        self.dec4 = ConvBlock(base_ch * 16, base_ch * 8)
+
+        self.up3 = nn.ConvTranspose2d(base_ch * 8, base_ch * 4, 2, stride=2)
+        self.dec3 = ConvBlock(base_ch * 8, base_ch * 4)
+
+        self.up2 = nn.ConvTranspose2d(base_ch * 4, base_ch * 2, 2, stride=2)
+        self.dec2 = ConvBlock(base_ch * 4, base_ch * 2)
+
+        self.up1 = nn.ConvTranspose2d(base_ch * 2, base_ch, 2, stride=2)
+        self.dec1 = ConvBlock(base_ch * 2, base_ch)
+
+        self.head = nn.Conv2d(base_ch, num_classes, 1)
+
+        self._init_weights()
+
+    def _init_weights(self) -> None:
+        for m in self.modules():
+            if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
+
+    def forward(self, x):
+
+        e1 = self.enc1(x)
+        e2 = self.enc2(self.pool(e1))
+        e3 = self.enc3(self.pool(e2))
+        e4 = self.enc4(self.pool(e3))
+
+        b = self.bottleneck(self.pool(e4))
+
+        d4 = self.dec4(torch.cat([self.up4(b), e4], dim=1))
+        d3 = self.dec3(torch.cat([self.up3(d4), e3], dim=1))
+        d2 = self.dec2(torch.cat([self.up2(d3), e2], dim=1))
+        d1 = self.dec1(torch.cat([self.up1(d2), e1], dim=1))
+
+        return self.head(d1)
+
+
 # ---------------------------------------------------------------------------
 # Model registry -- add new models here
 # ---------------------------------------------------------------------------
 MODEL_REGISTRY: dict[str, type[nn.Module]] = {
     "fcn8s": FCN8s,
+    "unet": UNet,
 }
 
 

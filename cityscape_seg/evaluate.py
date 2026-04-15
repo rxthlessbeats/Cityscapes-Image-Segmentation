@@ -16,11 +16,12 @@ def compute_miou(
     loader: torch.utils.data.DataLoader,
     num_classes: int,
     device: torch.device,
+    use_amp: bool = False,
 ) -> list[float]:
     """Compute per-class IoU and mean IoU over a DataLoader."""
     confusion = torch.zeros(num_classes, num_classes, dtype=torch.long)
     model.eval()
-    with torch.no_grad():
+    with torch.no_grad(), torch.amp.autocast("cuda", enabled=use_amp):
         for imgs, lbls, _ in loader:
             imgs = imgs.to(device)
             preds = model(imgs).argmax(dim=1).cpu()
@@ -57,6 +58,7 @@ def visualize_predictions(
     dataset,
     device: torch.device,
     num_samples: int = 4,
+    use_amp: bool = False,
 ) -> None:
     """Show input / ground-truth / prediction side by side."""
     model.eval()
@@ -65,7 +67,7 @@ def visualize_predictions(
 
     for i in range(num_samples):
         img, lbl, _ = dataset[i]
-        with torch.no_grad():
+        with torch.no_grad(), torch.amp.autocast("cuda", enabled=use_amp):
             pred = model(img.unsqueeze(0).to(device)).argmax(dim=1).squeeze(0).cpu().numpy()
 
         img_vis = inv_normalize(img).permute(1, 2, 0).clamp(0, 1).numpy()

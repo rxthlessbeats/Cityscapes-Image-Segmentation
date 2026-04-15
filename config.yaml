@@ -1,5 +1,5 @@
 # Training hyperparameters (loaded by TrainConfig)
-model_name: fcn8s          # registered model name (see model.py MODEL_REGISTRY)
+model_name: unet         # registered model name (see model.py MODEL_REGISTRY)
 img_height: 256
 img_width: 512
 batch_size: 4
@@ -10,5 +10,6 @@ weight_decay: 0.001
 num_train: 400
 num_val: 100
 seed: 42
-loss_type: cross_entropy   # or "focal"
+loss_type: focal  # or "focal"
 focal_gamma: 2.0
+use_amp: true              # mixed-precision training (float16 on CUDA)

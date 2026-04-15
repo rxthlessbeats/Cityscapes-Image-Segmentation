@@ -17,7 +17,7 @@ from tqdm import tqdm
 from .config import Settings, TrainConfig
 from .dataset import CityscapesSegDataset
 from .evaluate import compute_miou, print_miou_report
-from .labels import CLASS_NAMES
+from .labels import CLASS_NAMES, NUM_CLASSES
 from .loss import build_criterion
 from .model import build_model
 from .transforms import build_train_transform, build_val_transform
@@ -31,16 +31,26 @@ def train_one_epoch(
     optimizer: optim.Optimizer,
     device: torch.device,
     loss_type: str,
+    scaler: torch.amp.GradScaler | None = None,
 ) -> tuple[float, float]:
     model.train()
+    use_amp = scaler is not None
     running_loss, correct, total = 0.0, 0, 0
     for imgs, lbls, masks in tqdm(loader, desc="Train", leave=False):
         imgs, lbls, masks = imgs.to(device), lbls.to(device), masks.to(device)
-        optimizer.zero_grad()
-        out = model(imgs)
-        loss = criterion(out, lbls, masks) if loss_type == "focal" else criterion(out, lbls)
-        loss.backward()
-        optimizer.step()
+
+        optimizer.zero_grad(set_to_none=True)
+        with torch.amp.autocast("cuda", enabled=use_amp):
+            out = model(imgs)
+            loss = criterion(out, lbls, masks) if loss_type == "focal" else criterion(out, lbls)
+
+        if use_amp:
+            scaler.scale(loss).backward()  # type: ignore[union-attr]
+            scaler.step(optimizer)  # type: ignore[union-attr]
+            scaler.update()  # type: ignore[union-attr]
+        else:
+            loss.backward()
+            optimizer.step()
 
         running_loss += loss.item() * imgs.size(0)
         preds = out.argmax(dim=1)
@@ -57,10 +67,11 @@ def validate(
     criterion: nn.Module,
     device: torch.device,
     loss_type: str,
+    use_amp: bool = False,
 ) -> tuple[float, float]:
     model.eval()
     running_loss, correct, total = 0.0, 0, 0
-    with torch.no_grad():
+    with torch.no_grad(), torch.amp.autocast("cuda", enabled=use_amp):
         for imgs, lbls, masks in tqdm(loader, desc="Val  ", leave=False):
             imgs, lbls, masks = imgs.to(device), lbls.to(device), masks.to(device)
             out = model(imgs)
@@ -86,7 +97,11 @@ def _compute_class_weights(
 
     freq = pixel_counts / pixel_counts.sum()
     inv_freq = 1.0 / (freq + 1e-6)
-    return (inv_freq / inv_freq.sum() * num_classes).to(device)
+    # Inverse-frequency weights
+    # class_weights = (inv_freq / inv_freq.sum() * num_classes).to(device)
+    # Dampened weights
+    class_weights = (inv_freq.sqrt() / inv_freq.sqrt().sum() * NUM_CLASSES).to(device)
+    return class_weights
 
 
 def _make_run_name(config: TrainConfig) -> str:
@@ -100,6 +115,7 @@ def _log_predictions(
     dataset,
     device: torch.device,
     num_samples: int = 4,
+    use_amp: bool = False,
 ) -> None:
     """Log input / ground-truth / prediction grids to TensorBoard."""
     model.eval()
@@ -108,7 +124,7 @@ def _log_predictions(
 
     for i in range(num_samples):
         img, lbl, _ = dataset[i]
-        with torch.no_grad():
+        with torch.no_grad(), torch.amp.autocast("cuda", enabled=use_amp):
             pred = model(img.unsqueeze(0).to(device)).argmax(dim=1).squeeze(0).cpu().numpy()
         img_vis = inv_normalize(img).permute(1, 2, 0).clamp(0, 1).numpy()
         gt_vis = label_to_color(lbl.numpy())
@@ -192,6 +208,11 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
         weight_decay=config.weight_decay,
     )
 
+    # AMP scaler (only when enabled and on CUDA)
+    use_amp = config.use_amp and device.type == "cuda"
+    scaler = torch.amp.GradScaler("cuda") if use_amp else None
+    print(f"Mixed precision (AMP): {'enabled' if use_amp else 'disabled'}")
+
     # TensorBoard
     run_name = _make_run_name(config)
     log_path = Path(settings.log_dir) / run_name
@@ -211,6 +232,7 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
             optimizer,
             device,
             config.loss_type,
+            scaler=scaler,
         )
         v_loss, v_acc = validate(
             model,
@@ -218,6 +240,7 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
             criterion,
             device,
             config.loss_type,
+            use_amp=use_amp,
         )
 
         train_losses.append(t_loss)
@@ -239,7 +262,7 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
     print("\nTraining complete.")
 
     # Evaluation
-    ious = compute_miou(model, val_loader, config.num_classes, device)
+    ious = compute_miou(model, val_loader, config.num_classes, device, use_amp=use_amp)
     print_miou_report(ious)
     miou = float(np.mean(ious))
 
@@ -249,7 +272,7 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
     writer.add_scalar("IoU/mIoU", miou, config.num_epochs)
 
     # Log prediction visualisations
-    _log_predictions(writer, model, val_ds, device, num_samples=4)
+    _log_predictions(writer, model, val_ds, device, num_samples=4, use_amp=use_amp)
 
     # Log hyperparameters alongside final metrics
     writer.add_hparams(

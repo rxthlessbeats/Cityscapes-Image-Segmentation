@@ -38,6 +38,7 @@ class TrainConfig(BaseModel):
     seed: int = 42
     loss_type: Literal["cross_entropy", "focal"] = "cross_entropy"
     focal_gamma: float = Field(2.0, ge=0)
+    use_amp: bool = True
 
     @field_validator("model_name")
     @classmethod
