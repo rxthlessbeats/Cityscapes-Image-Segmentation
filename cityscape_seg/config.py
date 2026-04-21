@@ -39,6 +39,14 @@ class TrainConfig(BaseModel):
     loss_type: Literal["cross_entropy", "focal"] = "cross_entropy"
     focal_gamma: float = Field(2.0, ge=0)
     use_amp: bool = True
+    augment_train: bool = True
+    use_class_weights: bool = True
+    oversample_classes: list[int] = Field(default=[1, 2, 4])  # [] to disable
+    lr_scheduler: Literal["none", "plateau"] = "plateau"
+    plateau_patience: int = Field(2, ge=0)
+    plateau_factor: float = Field(0.5, gt=0, lt=1)
+    plateau_min_lr: float = Field(1e-6, ge=0)
+    load_best_checkpoint: bool = True
 
     @field_validator("model_name")
     @classmethod

@@ -1,5 +1,5 @@
 # Training hyperparameters (loaded by TrainConfig)
-model_name: unet         # registered model name (see model.py MODEL_REGISTRY)
+model_name: deeplabv3plus         # registered model name (see model.py MODEL_REGISTRY)
 img_height: 256
 img_width: 512
 batch_size: 4
@@ -13,3 +13,11 @@ seed: 42
 loss_type: focal  # or "focal"
 focal_gamma: 2.0
 use_amp: true              # mixed-precision training (float16 on CUDA)
+augment_train: true        # false to use val_transform on train set (no augmentation)
+use_class_weights: true    # false to disable inverse-frequency class weighting
+oversample_classes: [1, 2, 4]  # sidewalk, human, traffic object ([] to disable)
+lr_scheduler: plateau       # "none" or "plateau" (ReduceLROnPlateau on val loss)
+plateau_patience: 2
+plateau_factor: 0.5
+plateau_min_lr: 1.0e-6
+load_best_checkpoint: true   # restore lowest-val-loss weights before eval / TensorBoard

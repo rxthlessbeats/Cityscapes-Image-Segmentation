@@ -147,7 +147,7 @@ python -m cityscape_seg train
 To use a custom config file:
 
 ```bash
-python -m cityscape_seg train --config my_config.yaml
+python -m cityscape_seg train --config config.yaml
 ```
 
 ### Use the notebook

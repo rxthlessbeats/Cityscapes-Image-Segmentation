@@ -45,7 +45,7 @@ class FocalLoss(nn.Module):
 
 def build_criterion(
     config: TrainConfig,
-    class_weights: torch.Tensor,
+    class_weights: torch.Tensor | None,
     device: torch.device,
 ) -> nn.Module:
     """Factory: return the appropriate loss module based on ``config.loss_type``."""

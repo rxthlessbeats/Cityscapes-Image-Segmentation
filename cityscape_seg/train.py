@@ -10,7 +10,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -149,8 +149,11 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
     print(f"Using device: {device}")
 
     # Transforms
-    train_transform = build_train_transform(config)
+    train_transform = (
+        build_train_transform(config) if config.augment_train else build_val_transform()
+    )
     val_transform = build_val_transform()
+    print(f"Train augmentation: {'enabled' if config.augment_train else 'disabled'}")
 
     # Datasets (only load the number of samples we actually need)
     train_ds = CityscapesSegDataset(
@@ -170,10 +173,31 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
         seed=config.seed,
     )
 
+    # Oversampling (optional)
+    sampler = None
+    if config.oversample_classes:
+        oversample_boost = 3.0
+        sample_weights = torch.ones(len(train_ds))
+        n_boosted = 0
+        for i in range(len(train_ds)):
+            _, lbl, _ = train_ds[i]
+            if any((lbl == c).any() for c in config.oversample_classes):
+                sample_weights[i] = oversample_boost
+                n_boosted += 1
+        sampler = WeightedRandomSampler(sample_weights, num_samples=len(train_ds), replacement=True)
+        boosted_names = [CLASS_NAMES[c] for c in config.oversample_classes]
+        print(
+            f"Oversampling: {n_boosted}/{len(train_ds)} images boosted {oversample_boost}x "
+            f"(contain {', '.join(boosted_names)})"
+        )
+    else:
+        print("Oversampling: disabled")
+
     train_loader = DataLoader(
         train_ds,
         batch_size=config.batch_size,
-        shuffle=True,
+        shuffle=(sampler is None),
+        sampler=sampler,
         num_workers=settings.num_workers,
         pin_memory=settings.pin_memory,
     )
@@ -189,10 +213,14 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
     print(f"Val:   {len(val_ds)} samples  ({len(val_loader)} batches)")
 
     # Class weights & criterion
-    class_weights = _compute_class_weights(train_loader, config.num_classes, device)
-    print("\nClass pixel distribution:")
-    for name, w in zip(CLASS_NAMES, class_weights):
-        print(f"  {name:<20s}  weight: {w:.3f}")
+    if config.use_class_weights:
+        class_weights = _compute_class_weights(train_loader, config.num_classes, device)
+        print("\nClass weights (dampened inverse-frequency):")
+        for name, w in zip(CLASS_NAMES, class_weights):
+            print(f"  {name:<20s}  weight: {w:.3f}")
+    else:
+        class_weights = None
+        print("\nClass weights: disabled (uniform)")
 
     criterion = build_criterion(config, class_weights, device)
 
@@ -208,6 +236,23 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
         weight_decay=config.weight_decay,
     )
 
+    scheduler = None
+    if config.lr_scheduler == "plateau":
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=config.plateau_factor,
+            patience=config.plateau_patience,
+            min_lr=config.plateau_min_lr,
+        )
+        print(
+            f"LR scheduler: ReduceLROnPlateau "
+            f"(patience={config.plateau_patience}, factor={config.plateau_factor}, "
+            f"min_lr={config.plateau_min_lr})"
+        )
+    else:
+        print("LR scheduler: disabled")
+
     # AMP scaler (only when enabled and on CUDA)
     use_amp = config.use_amp and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda") if use_amp else None
@@ -222,6 +267,8 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
     # Training loop
     train_losses, val_losses = [], []
     train_accs, val_accs = [], []
+    best_val_loss = float("inf")
+    best_state: dict[str, torch.Tensor] | None = None
 
     epoch_bar = tqdm(range(1, config.num_epochs + 1), desc="Epochs")
     for epoch in epoch_bar:
@@ -252,14 +299,26 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
         writer.add_scalars("Accuracy", {"train": t_acc, "val": v_acc}, epoch)
         writer.add_scalar("LR", optimizer.param_groups[0]["lr"], epoch)
 
+        if v_loss < best_val_loss:
+            best_val_loss = v_loss
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+
+        if scheduler is not None:
+            scheduler.step(v_loss)
+
+        lr_now = optimizer.param_groups[0]["lr"]
         epoch_bar.set_postfix(
             t_loss=f"{t_loss:.4f}",
             t_acc=f"{t_acc:.4f}",
             v_loss=f"{v_loss:.4f}",
             v_acc=f"{v_acc:.4f}",
+            lr=f"{lr_now:.2e}",
         )
 
     print("\nTraining complete.")
+    if config.load_best_checkpoint and best_state is not None:
+        model.load_state_dict({k: v.to(device) for k, v in best_state.items()})
+        print(f"Loaded best checkpoint (val_loss={best_val_loss:.4f}) for evaluation.")
 
     # Evaluation
     ious = compute_miou(model, val_loader, config.num_classes, device, use_amp=use_amp)
@@ -285,10 +344,13 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
             "num_epochs": config.num_epochs,
             "num_train": config.num_train,
             "img_size": f"{config.img_height}x{config.img_width}",
+            "lr_scheduler": config.lr_scheduler,
+            "load_best_checkpoint": int(config.load_best_checkpoint),
         },
         {
             "hparam/val_loss": val_losses[-1],
             "hparam/val_acc": val_accs[-1],
+            "hparam/best_val_loss": best_val_loss,
             "hparam/mIoU": miou,
         },
     )

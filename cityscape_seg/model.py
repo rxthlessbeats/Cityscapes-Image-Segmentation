@@ -1,13 +1,4 @@
-"""FCN-8s model built from scratch for semantic segmentation.
-
-Architecture following Long et al. "Fully Convolutional Networks
-for Semantic Segmentation" (CVPR 2015):
-
-  Encoder : 5 VGG-style blocks (conv-bn-relu pairs + maxpool)
-  Bridge  : two 1x1 conv layers (replace the original FC6/FC7)
-  Decoder : transposed convolutions with FCN-8s skip connections
-            from pool3 and pool4 for fine-grained spatial detail
-"""
+"""Segmentation models built from scratch: FCN-8s, U-Net, DeepLabV3+."""
 
 from __future__ import annotations
 
@@ -203,12 +194,136 @@ class UNet(nn.Module):
         return self.head(d1)
 
 
+class ASPP(nn.Module):
+    """Atrous Spatial Pyramid Pooling (Chen et al., 2017).
+
+    Parallel branches with different dilation rates capture multi-scale context.
+    """
+
+    def __init__(self, in_ch: int, out_ch: int = 256, rates: tuple[int, ...] = (6, 12, 18)) -> None:
+        super().__init__()
+        modules: list[nn.Module] = [
+            nn.Sequential(
+                nn.Conv2d(in_ch, out_ch, 1, bias=False),
+                nn.BatchNorm2d(out_ch),
+                nn.ReLU(inplace=True),
+            )
+        ]
+        for rate in rates:
+            modules.append(
+                nn.Sequential(
+                    nn.Conv2d(in_ch, out_ch, 3, padding=rate, dilation=rate, bias=False),
+                    nn.BatchNorm2d(out_ch),
+                    nn.ReLU(inplace=True),
+                )
+            )
+        # Image-level features (global average pooling; no BN -- spatial size is 1x1)
+        modules.append(
+            nn.Sequential(
+                nn.AdaptiveAvgPool2d(1),
+                nn.Conv2d(in_ch, out_ch, 1),
+                nn.ReLU(inplace=True),
+            )
+        )
+        self.branches = nn.ModuleList(modules)
+        self.project = nn.Sequential(
+            nn.Conv2d(out_ch * (len(rates) + 2), out_ch, 1, bias=False),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
+        )
+
+    def forward(self, x):
+        results = []
+        for branch in self.branches[:-1]:
+            results.append(branch(x))
+        img_feat = self.branches[-1](x)
+        img_feat = nn.functional.interpolate(
+            img_feat, size=x.shape[2:], mode="bilinear", align_corners=False
+        )
+        results.append(img_feat)
+        return self.project(torch.cat(results, dim=1))
+
+
+class DeepLabV3Plus(nn.Module):
+    """DeepLabV3+ (Chen et al., 2018) built from scratch.
+
+    Encoder : 4 VGG-style stages (ConvBlock + MaxPool), output stride 16
+    ASPP    : multi-scale context at the encoder output
+    Decoder : low-level skip from stage 1 (stride 4), refine + upsample
+    """
+
+    def __init__(self, num_classes: int, base_ch: int = 32) -> None:
+        super().__init__()
+        self.enc1 = ConvBlock(3, base_ch, n_convs=2)
+        self.enc2 = ConvBlock(base_ch, base_ch * 2, n_convs=2)
+        self.enc3 = ConvBlock(base_ch * 2, base_ch * 4, n_convs=3)
+        self.enc4 = ConvBlock(base_ch * 4, base_ch * 8, n_convs=3)
+        self.pool = nn.MaxPool2d(2)
+
+        aspp_out_ch = 256
+        self.aspp = ASPP(base_ch * 8, out_ch=aspp_out_ch)
+
+        self.low_level_proj = nn.Sequential(
+            nn.Conv2d(base_ch, 48, 1, bias=False),
+            nn.BatchNorm2d(48),
+            nn.ReLU(inplace=True),
+        )
+        self.refine = nn.Sequential(
+            nn.Conv2d(aspp_out_ch + 48, 256, 3, padding=1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
+            nn.Conv2d(256, 256, 3, padding=1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.1),
+        )
+        self.head = nn.Conv2d(256, num_classes, 1)
+
+        self._init_weights()
+
+    def _init_weights(self) -> None:
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
+
+    def forward(self, x):
+        h, w = x.shape[2:]
+
+        e1 = self.enc1(x)
+        e2 = self.enc2(self.pool(e1))
+        e3 = self.enc3(self.pool(e2))
+        e4 = self.enc4(self.pool(e3))
+        deep = self.pool(e4)
+
+        aspp_out = self.aspp(deep)
+
+        low_level = self.low_level_proj(self.pool(e1))
+
+        aspp_up = nn.functional.interpolate(
+            aspp_out, size=low_level.shape[2:], mode="bilinear", align_corners=False
+        )
+        fused = torch.cat([aspp_up, low_level], dim=1)
+        refined = self.refine(fused)
+
+        out = self.head(refined)
+        out = nn.functional.interpolate(out, size=(h, w), mode="bilinear", align_corners=False)
+        return out
+
+
 # ---------------------------------------------------------------------------
 # Model registry -- add new models here
 # ---------------------------------------------------------------------------
 MODEL_REGISTRY: dict[str, type[nn.Module]] = {
     "fcn8s": FCN8s,
     "unet": UNet,
+    "deeplabv3plus": DeepLabV3Plus,
 }
 
 
