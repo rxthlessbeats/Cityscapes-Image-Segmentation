@@ -1,6 +1,6 @@
 # Cityscapes Semantic Segmentation
 
-FCN-8s semantic segmentation on the Cityscapes dataset, with an 8-class label scheme.
+Semantic segmentation on the Cityscapes dataset with multiple architectures and an 8-class label scheme.
 
 ## Project Structure
 
@@ -24,7 +24,7 @@ cityscape_seg/
     labels.py           # class names, colours, label remap table
     transforms.py       # paired image-label augmentations
     dataset.py          # CityscapesSegDataset
-    model.py            # ConvBlock, FCN8s
+    model.py            # ConvBlock, FCN8s, UNet, DeepLabV3+
     loss.py             # FocalLoss, build_criterion()
     train.py            # training / validation loops
     evaluate.py         # mIoU, qualitative visualisation
@@ -99,6 +99,7 @@ CITYSEG_PIN_MEMORY=true
 Edit `config.yaml` to adjust hyperparameters:
 
 ```yaml
+model_name: unet            # fcn8s, unet, or deeplabv3plus
 img_height: 256
 img_width: 512
 batch_size: 4
@@ -182,11 +183,29 @@ tensorboard --logdir runs
 | 6  | construction   | 11-16 (building, wall, fence ...) |
 | 7  | background     | everything else (void)            |
 
-## Model
+## Models
 
-Custom FCN-8s following Long et al. (CVPR 2015):
+Pick a backbone with `model_name` in `config.yaml` (see `MODEL_REGISTRY` in `cityscape_seg/model.py`). All are trained from scratch on your 8-class logits.
+
+| `model_name`   | Reference | Summary |
+|----------------|-----------|---------|
+| `fcn8s`        | Long et al., CVPR 2015 | VGG-style encoder, 1x1 bridge with dropout, FCN-8s decoder with skips from pool3/pool4 (~16.3M params). |
+| `unet`         | Ronneberger et al., 2015 | Encoder–decoder with skip concatenation; default `base_ch=32`. |
+| `deeplabv3plus`| Chen et al., ECCV 2018 | VGG-style encoder (stride 16), ASPP + image-level branch, decoder with low-level skip; default `base_ch=64`. |
+
+**FCN-8s** (`fcn8s`)
 
 - **Encoder**: 5 VGG-style blocks with BatchNorm
 - **Bridge**: two 1x1 conv layers with dropout (replaces FC6/FC7)
 - **Decoder**: transposed convolutions with skip connections from pool3 and pool4
-- ~16.3M parameters
+
+**U-Net** (`unet`)
+
+- Four encoder stages, bottleneck, symmetric decoder with transposed-conv upsampling and `ConvBlock` after each skip concat.
+
+**DeepLabV3+** (`deeplabv3plus`)
+
+- **ASPP**: parallel 1x1 and dilated 3x3 branches (rates 6, 12, 18) plus global-pool branch (no BN on 1x1 pooled activations), then 1x1 projection.
+- **Decoder**: upsample ASPP features, concat with projected low-level features, refine with two 3x3 convs, bilinear upsample to input resolution.
+
+The notebook `notebooks/base.ipynb` mirrors the same three options via `MODEL_NAME`.
