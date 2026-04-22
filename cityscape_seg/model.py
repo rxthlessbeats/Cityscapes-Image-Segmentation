@@ -28,34 +28,41 @@ class ConvBlock(nn.Module):
 
 
 class FCN8s(nn.Module):
-    """FCN-8s (Long et al., 2015) built from scratch."""
+    """FCN-8s (Long et al., 2015) built from scratch.
 
-    def __init__(self, num_classes: int) -> None:
+    Channel width follows a VGG-style schedule scaled by ``base_ch`` (default 64
+    matches the original 64, 128, 256, 512, 512 encoder and 1024-d bridge).
+    """
+
+    def __init__(self, num_classes: int, base_ch: int = 64) -> None:
         super().__init__()
+        b = base_ch
+        c1, c2, c3, c4, c5 = b, 2 * b, 4 * b, 8 * b, 8 * b
+        c_br = 16 * b
 
         # Encoder
-        self.enc1 = ConvBlock(3, 64, n_convs=2)
-        self.enc2 = ConvBlock(64, 128, n_convs=2)
-        self.enc3 = ConvBlock(128, 256, n_convs=3)
-        self.enc4 = ConvBlock(256, 512, n_convs=3)
-        self.enc5 = ConvBlock(512, 512, n_convs=3)
+        self.enc1 = ConvBlock(3, c1, n_convs=2)
+        self.enc2 = ConvBlock(c1, c2, n_convs=2)
+        self.enc3 = ConvBlock(c2, c3, n_convs=3)
+        self.enc4 = ConvBlock(c3, c4, n_convs=3)
+        self.enc5 = ConvBlock(c4, c5, n_convs=3)
 
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
         # Bridge (replaces FC6 / FC7)
         self.bridge = nn.Sequential(
-            nn.Conv2d(512, 1024, 1),
-            nn.BatchNorm2d(1024),
+            nn.Conv2d(c5, c_br, 1),
+            nn.BatchNorm2d(c_br),
             nn.ReLU(inplace=True),
             nn.Dropout2d(0.5),
-            nn.Conv2d(1024, 1024, 1),
-            nn.BatchNorm2d(1024),
+            nn.Conv2d(c_br, c_br, 1),
+            nn.BatchNorm2d(c_br),
             nn.ReLU(inplace=True),
             nn.Dropout2d(0.5),
         )
 
         # Decoder (FCN-8s)
-        self.score_bridge = nn.Conv2d(1024, num_classes, 1)
+        self.score_bridge = nn.Conv2d(c_br, num_classes, 1)
 
         self.up_bridge = nn.ConvTranspose2d(
             num_classes,
@@ -64,7 +71,7 @@ class FCN8s(nn.Module):
             stride=2,
             padding=1,
         )
-        self.score_pool4 = nn.Conv2d(512, num_classes, 1)
+        self.score_pool4 = nn.Conv2d(c4, num_classes, 1)
 
         self.up_pool4 = nn.ConvTranspose2d(
             num_classes,
@@ -73,7 +80,7 @@ class FCN8s(nn.Module):
             stride=2,
             padding=1,
         )
-        self.score_pool3 = nn.Conv2d(256, num_classes, 1)
+        self.score_pool3 = nn.Conv2d(c3, num_classes, 1)
 
         self.up_final = nn.ConvTranspose2d(
             num_classes,
@@ -139,7 +146,7 @@ class UNet(nn.Module):
     Symmetric encoder-decoder with skip connections via concatenation.
     """
 
-    def __init__(self, num_classes: int, base_ch: int = 32) -> None:
+    def __init__(self, num_classes: int, base_ch: int = 16) -> None:
         super().__init__()
 
         self.enc1 = ConvBlock(3, base_ch)
@@ -253,7 +260,7 @@ class DeepLabV3Plus(nn.Module):
     Decoder : low-level skip from stage 1 (stride 4), refine + upsample
     """
 
-    def __init__(self, num_classes: int, base_ch: int = 32) -> None:
+    def __init__(self, num_classes: int, base_ch: int = 16) -> None:
         super().__init__()
         self.enc1 = ConvBlock(3, base_ch, n_convs=2)
         self.enc2 = ConvBlock(base_ch, base_ch * 2, n_convs=2)
@@ -330,4 +337,4 @@ MODEL_REGISTRY: dict[str, type[nn.Module]] = {
 def build_model(config: TrainConfig) -> nn.Module:
     """Instantiate the model specified by ``config.model_name``."""
     cls = MODEL_REGISTRY[config.model_name]
-    return cls(config.num_classes)
+    return cls(config.num_classes, base_ch=config.base_ch)

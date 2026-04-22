@@ -26,6 +26,8 @@ class TrainConfig(BaseModel):
     """Training hyperparameters with validation."""
 
     model_name: str = "fcn8s"
+    # Encoder width for FCN-8s, U-Net, and DeepLabV3+ (default 64 = original FCN-8s/VGG width).
+    base_ch: int = Field(64, ge=1)
     img_height: int = Field(256, gt=0)
     img_width: int = Field(512, gt=0)
     batch_size: int = Field(4, gt=0)
@@ -51,6 +53,8 @@ class TrainConfig(BaseModel):
     prefer_train_images_with_classes: list[int] | None = None
     prefer_train_min_rare_fraction: float = Field(0.05, ge=0.0, le=1.0)
     rare_crop_num_samples: int = Field(10, ge=1)
+    # Stop if val loss does not improve (strictly) for this many consecutive epochs. 0 = disabled.
+    early_stopping_patience: int = Field(8, ge=0)
 
     @field_validator("model_name")
     @classmethod

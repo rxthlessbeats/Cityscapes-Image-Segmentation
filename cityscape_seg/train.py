@@ -255,12 +255,20 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
     log_path = Path(settings.log_dir) / run_name
     writer = SummaryWriter(log_dir=str(log_path))
     print(f"TensorBoard log dir: {log_path}")
+    if config.early_stopping_patience > 0:
+        print(
+            f"Early stopping: stop if val loss does not improve for {config.early_stopping_patience} "
+            "consecutive epochs (vs best so far)"
+        )
+    else:
+        print("Early stopping: disabled")
 
     # Training loop
     train_losses, val_losses = [], []
     train_accs, val_accs = [], []
     best_val_loss = float("inf")
     best_state: dict[str, torch.Tensor] | None = None
+    no_improve_epochs = 0
 
     epoch_bar = tqdm(range(1, config.num_epochs + 1), desc="Epochs")
     for epoch in epoch_bar:
@@ -294,6 +302,10 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
         if v_loss < best_val_loss:
             best_val_loss = v_loss
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            if config.early_stopping_patience > 0:
+                no_improve_epochs = 0
+        elif config.early_stopping_patience > 0:
+            no_improve_epochs += 1
 
         if scheduler is not None:
             scheduler.step(v_loss)
@@ -307,7 +319,20 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
             lr=f"{lr_now:.2e}",
         )
 
-    print("\nTraining complete.")
+        if (
+            config.early_stopping_patience > 0
+            and no_improve_epochs >= config.early_stopping_patience
+        ):
+            print(
+                f"\nEarly stopping at epoch {epoch} "
+                f"(val loss did not improve vs best for {config.early_stopping_patience} consecutive epochs)"
+            )
+            break
+
+    final_epoch = len(train_losses)
+    print(
+        f"\nTraining complete ({final_epoch} epoch(s))." if final_epoch else "\nTraining complete."
+    )
     if config.load_best_checkpoint and best_state is not None:
         model.load_state_dict({k: v.to(device) for k, v in best_state.items()})
         print(f"Loaded best checkpoint (val_loss={best_val_loss:.4f}) for evaluation.")
@@ -319,8 +344,8 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
 
     # Log per-class IoU and mIoU
     for name, iou in zip(CLASS_NAMES, ious):
-        writer.add_scalar(f"IoU/{name}", iou, config.num_epochs)
-    writer.add_scalar("IoU/mIoU", miou, config.num_epochs)
+        writer.add_scalar(f"IoU/{name}", iou, final_epoch)
+    writer.add_scalar("IoU/mIoU", miou, final_epoch)
 
     # Log prediction visualisations
     _log_predictions(writer, model, val_ds, device, num_samples=4, use_amp=use_amp)
@@ -329,6 +354,7 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
     writer.add_hparams(
         {
             "model": config.model_name,
+            "base_ch": config.base_ch,
             "batch_size": config.batch_size,
             "lr": config.lr,
             "weight_decay": config.weight_decay,
@@ -344,12 +370,14 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
             or "none",
             "prefer_train_min_rare_fraction": config.prefer_train_min_rare_fraction,
             "rare_crop_num_samples": config.rare_crop_num_samples,
+            "early_stopping_patience": config.early_stopping_patience,
         },
         {
             "hparam/val_loss": val_losses[-1],
             "hparam/val_acc": val_accs[-1],
             "hparam/best_val_loss": best_val_loss,
             "hparam/mIoU": miou,
+            "hparam/epochs_ran": final_epoch,
         },
     )
 
