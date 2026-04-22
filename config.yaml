@@ -1,6 +1,6 @@
 # Training hyperparameters (loaded by TrainConfig)
 model_name: fcn8s         # registered model name (see model.py MODEL_REGISTRY)
-base_ch: 64               # encoder width for fcn8s, unet, deeplabv3plus
+base_ch: 16               # encoder width for fcn8s, unet, deeplabv3plus
 img_height: 256
 img_width: 512
 batch_size: 8

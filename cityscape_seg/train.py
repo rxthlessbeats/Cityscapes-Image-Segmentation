@@ -267,6 +267,7 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
     train_losses, val_losses = [], []
     train_accs, val_accs = [], []
     best_val_loss = float("inf")
+    best_val_acc = 0.0
     best_state: dict[str, torch.Tensor] | None = None
     no_improve_epochs = 0
 
@@ -301,6 +302,7 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
 
         if v_loss < best_val_loss:
             best_val_loss = v_loss
+            best_val_acc = v_acc
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
             if config.early_stopping_patience > 0:
                 no_improve_epochs = 0
@@ -335,7 +337,10 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
     )
     if config.load_best_checkpoint and best_state is not None:
         model.load_state_dict({k: v.to(device) for k, v in best_state.items()})
-        print(f"Loaded best checkpoint (val_loss={best_val_loss:.4f}) for evaluation.")
+        print(
+            f"Loaded best checkpoint (val_loss={best_val_loss:.4f}, val_acc={best_val_acc:.4f}) "
+            "for evaluation."
+        )
 
     # Evaluation
     ious = compute_miou(model, val_loader, config.num_classes, device, use_amp=use_amp)
