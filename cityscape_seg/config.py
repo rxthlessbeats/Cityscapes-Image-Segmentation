@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -46,6 +46,11 @@ class TrainConfig(BaseModel):
     plateau_factor: float = Field(0.5, gt=0, lt=1)
     plateau_min_lr: float = Field(1e-6, ge=0)
     load_best_checkpoint: bool = True
+    # Prefer images (at img_size after remap) with pixels in these classes; pad to num_train.
+    # null or [] disables: uniform random subset + single random resized crop (no best-of-N).
+    prefer_train_images_with_classes: list[int] | None = None
+    prefer_train_min_rare_fraction: float = Field(0.05, ge=0.0, le=1.0)
+    rare_crop_num_samples: int = Field(10, ge=1)
 
     @field_validator("model_name")
     @classmethod
@@ -65,9 +70,24 @@ class TrainConfig(BaseModel):
             raise ValueError("loss_type must be 'cross_entropy' or 'focal'")
         return v
 
+    @model_validator(mode="after")
+    def _validate_prefer_classes(self) -> TrainConfig:
+        if self.prefer_train_images_with_classes:
+            for c in self.prefer_train_images_with_classes:
+                if c < 0 or c >= self.num_classes:
+                    raise ValueError(
+                        f"prefer_train_images_with_classes entry {c} out of range "
+                        f"for num_classes={self.num_classes}"
+                    )
+        return self
+
     @property
     def img_size(self) -> tuple[int, int]:
         return (self.img_height, self.img_width)
+
+    @property
+    def prefer_train_classes_active(self) -> bool:
+        return bool(self.prefer_train_images_with_classes)
 
 
 def load_train_config(path: str | Path = "config.yaml") -> TrainConfig:

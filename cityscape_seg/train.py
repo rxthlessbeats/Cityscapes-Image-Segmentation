@@ -154,6 +154,17 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
     )
     val_transform = build_val_transform()
     print(f"Train augmentation: {'enabled' if config.augment_train else 'disabled'}")
+    if config.prefer_train_classes_active:
+        print(
+            f"Train subset + crop: prefer classes {config.prefer_train_images_with_classes} "
+            f"(min_rare_frac={config.prefer_train_min_rare_fraction}, "
+            f"rare_crop_num_samples={config.rare_crop_num_samples})"
+        )
+    else:
+        print(
+            "Train subset + crop: uniform subset; single random resized crop "
+            "(prefer_train_images_with_classes null or empty)"
+        )
 
     # Datasets (only load the number of samples we actually need)
     train_ds = CityscapesSegDataset(
@@ -163,6 +174,8 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
         transform=train_transform,
         max_samples=config.num_train,
         seed=config.seed,
+        prefer_images_with_classes=config.prefer_train_images_with_classes,
+        prefer_min_rare_fraction=config.prefer_train_min_rare_fraction,
     )
     val_ds = CityscapesSegDataset(
         settings.data_root,
@@ -325,6 +338,12 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
             "img_size": f"{config.img_height}x{config.img_width}",
             "lr_scheduler": config.lr_scheduler,
             "load_best_checkpoint": int(config.load_best_checkpoint),
+            "prefer_train_classes": ",".join(
+                str(c) for c in (config.prefer_train_images_with_classes or [])
+            )
+            or "none",
+            "prefer_train_min_rare_fraction": config.prefer_train_min_rare_fraction,
+            "rare_crop_num_samples": config.rare_crop_num_samples,
         },
         {
             "hparam/val_loss": val_losses[-1],

@@ -9,6 +9,7 @@ import torchvision.transforms as T
 import torchvision.transforms.functional as TF
 
 from .config import TrainConfig
+from .labels import build_label_remap
 
 
 class PairedCompose:
@@ -43,15 +44,38 @@ class PairedColorJitter:
 
 
 class PairedRandomResizedCrop:
-    """Random crop + resize back to target size (same crop for both)."""
+    """Random crop + resize. With non-empty ``prefer_classes`` and ``num_samples`` > 1,
+    try multiple crops and keep the one with the largest fraction of label pixels in those classes.
+    """
 
-    def __init__(self, size, scale=(0.5, 1.0), ratio=(0.75, 1.33)) -> None:
+    def __init__(
+        self,
+        size,
+        scale=(0.5, 1.0),
+        ratio=(0.75, 1.33),
+        label_remap: np.ndarray | None = None,
+        prefer_classes: tuple[int, ...] = (),
+        num_samples: int = 1,
+    ) -> None:
         self.size = size
         self.scale = scale
         self.ratio = ratio
+        self._label_remap = label_remap if label_remap is not None else build_label_remap()
+        self.prefer_arr = np.asarray(prefer_classes, dtype=np.int64)
+        self.num_samples = num_samples
 
     def __call__(self, image, target):
-        i, j, h, w = T.RandomResizedCrop.get_params(image, self.scale, self.ratio)
+        best_score = -1.0
+        best_box = (0, 0, image.height, image.width)
+        for _ in range(self.num_samples):
+            i, j, h, w = T.RandomResizedCrop.get_params(image, self.scale, self.ratio)
+            patch = np.array(TF.crop(target, i, j, h, w), dtype=np.uint8)
+            mapped = self._label_remap[patch]
+            score = float(np.isin(mapped, self.prefer_arr).mean()) if self.prefer_arr.size else 0.0
+            if score > best_score:
+                best_score = score
+                best_box = (i, j, h, w)
+        i, j, h, w = best_box
         image = TF.resized_crop(
             image,
             i,
@@ -95,11 +119,25 @@ class PairedToTensorAndNormalize:
 
 
 def build_train_transform(config: TrainConfig) -> PairedCompose:
+    label_remap = build_label_remap()
+    use_prefer = config.prefer_train_classes_active
+    prefer_tuple = (
+        tuple(config.prefer_train_images_with_classes)
+        if config.prefer_train_images_with_classes
+        else ()
+    )
+    crop_samples = config.rare_crop_num_samples if use_prefer else 1
     return PairedCompose(
         [
             PairedRandomHorizontalFlip(p=0.5),
             PairedColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
-            PairedRandomResizedCrop(size=config.img_size, scale=(0.5, 1.0)),
+            PairedRandomResizedCrop(
+                size=config.img_size,
+                scale=(0.5, 1.0),
+                label_remap=label_remap,
+                prefer_classes=prefer_tuple,
+                num_samples=crop_samples,
+            ),
             PairedToTensorAndNormalize(),
         ]
     )

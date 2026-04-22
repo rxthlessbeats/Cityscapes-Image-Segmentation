@@ -114,6 +114,12 @@ loss_type: cross_entropy   # or "focal"
 focal_gamma: 2.0
 ```
 
+Optional **train subset and augmentation** (mirrors `notebooks/base.ipynb`):
+
+- `prefer_train_images_with_classes` — remapped class IDs (0–7) to upsample in the train split when `num_train` is smaller than the pool. Use `null` or `[]` for uniform random subset and a single random resized crop (no best-of-N).
+- `prefer_train_min_rare_fraction` — image is eligible if the fraction of pixels in those classes is **strictly greater** than this value; set to `0` for “any pixel present”.
+- `rare_crop_num_samples` — when the prefer list is non-empty, try this many random crops per step and keep the one with the highest fraction of prefer-class pixels.
+
 ### 6. Set up pre-commit hooks (recommended)
 
 The project uses [pre-commit](https://pre-commit.com/) to run linting and formatting checks automatically on every commit.
