@@ -41,7 +41,6 @@ class TrainConfig(BaseModel):
     use_amp: bool = True
     augment_train: bool = True
     use_class_weights: bool = True
-    oversample_classes: list[int] = Field(default=[1, 2, 4])  # [] to disable
     lr_scheduler: Literal["none", "plateau"] = "plateau"
     plateau_patience: int = Field(2, ge=0)
     plateau_factor: float = Field(0.5, gt=0, lt=1)

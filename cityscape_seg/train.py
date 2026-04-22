@@ -10,7 +10,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, WeightedRandomSampler
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -173,31 +173,10 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
         seed=config.seed,
     )
 
-    # Oversampling (optional)
-    sampler = None
-    if config.oversample_classes:
-        oversample_boost = 3.0
-        sample_weights = torch.ones(len(train_ds))
-        n_boosted = 0
-        for i in range(len(train_ds)):
-            _, lbl, _ = train_ds[i]
-            if any((lbl == c).any() for c in config.oversample_classes):
-                sample_weights[i] = oversample_boost
-                n_boosted += 1
-        sampler = WeightedRandomSampler(sample_weights, num_samples=len(train_ds), replacement=True)
-        boosted_names = [CLASS_NAMES[c] for c in config.oversample_classes]
-        print(
-            f"Oversampling: {n_boosted}/{len(train_ds)} images boosted {oversample_boost}x "
-            f"(contain {', '.join(boosted_names)})"
-        )
-    else:
-        print("Oversampling: disabled")
-
     train_loader = DataLoader(
         train_ds,
         batch_size=config.batch_size,
-        shuffle=(sampler is None),
-        sampler=sampler,
+        shuffle=True,
         num_workers=settings.num_workers,
         pin_memory=settings.pin_memory,
     )

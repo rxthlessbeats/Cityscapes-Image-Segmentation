@@ -15,7 +15,6 @@ focal_gamma: 2.0
 use_amp: true              # mixed-precision training (float16 on CUDA)
 augment_train: true        # false to use val_transform on train set (no augmentation)
 use_class_weights: true    # false to disable inverse-frequency class weighting
-oversample_classes: [1, 2, 4]  # sidewalk, human, traffic object ([] to disable)
 lr_scheduler: plateau       # "none" or "plateau" (ReduceLROnPlateau on val loss)
 plateau_patience: 2
 plateau_factor: 0.5
