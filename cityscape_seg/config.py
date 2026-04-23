@@ -41,7 +41,14 @@ class TrainConfig(BaseModel):
     loss_type: Literal["cross_entropy", "focal"] = "cross_entropy"
     focal_gamma: float = Field(2.0, ge=0)
     use_amp: bool = True
-    augment_train: bool = True
+    augment_train: bool = Field(
+        True,
+        description=(
+            "If true: train uses horizontal flip, color jitter, and random resized crop. "
+            "If false and prefer_train_images_with_classes is set: still uses RRC with best-of-N for those "
+            "classes (no flip/jitter). If false and prefer is empty: eval-style tensor+normalize only."
+        ),
+    )
     use_class_weights: bool = True
     lr_scheduler: Literal["none", "plateau"] = "plateau"
     plateau_patience: int = Field(2, ge=0)

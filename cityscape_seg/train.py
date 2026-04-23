@@ -89,19 +89,19 @@ def _compute_class_weights(
     loader: DataLoader,
     num_classes: int,
     device: torch.device,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return (per-class loss weights, train-set pixel counts per class) on device / CPU."""
     pixel_counts = torch.zeros(num_classes)
     for _, lbl, _ in loader:
         for c in range(num_classes):
             pixel_counts[c] += (lbl == c).sum()
 
-    freq = pixel_counts / pixel_counts.sum()
+    total_px = float(pixel_counts.sum())
+    freq = pixel_counts / (total_px + 1e-6)
     inv_freq = 1.0 / (freq + 1e-6)
-    # Inverse-frequency weights
-    # class_weights = (inv_freq / inv_freq.sum() * num_classes).to(device)
     # Dampened weights
     class_weights = (inv_freq.sqrt() / inv_freq.sqrt().sum() * NUM_CLASSES).to(device)
-    return class_weights
+    return class_weights, pixel_counts
 
 
 def _make_run_name(config: TrainConfig) -> str:
@@ -148,21 +148,32 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
     device = torch.device(settings.device)
     print(f"Using device: {device}")
 
-    # Transforms
-    train_transform = (
-        build_train_transform(config) if config.augment_train else build_val_transform()
-    )
+    # Transforms (``build_train_transform`` handles augment_train vs prefer-only RRC vs eval-style)
+    train_transform = build_train_transform(config)
     val_transform = build_val_transform()
-    print(f"Train augmentation: {'enabled' if config.augment_train else 'disabled'}")
+    if not config.augment_train and not config.prefer_train_classes_active:
+        print("Train transform: tensor + normalize only (no random flip / jitter / crop).")
+    elif not config.augment_train and config.prefer_train_classes_active:
+        print(
+            "Train transform: random resized crop + best-of-N for prefer classes; "
+            "no flip or color jitter (augment_train=false)."
+        )
+    elif config.prefer_train_classes_active:
+        print(
+            "Train transform: horizontal flip, color jitter, random resized crop "
+            f"with best-of-N (rare_crop_num_samples={config.rare_crop_num_samples})."
+        )
+    else:
+        print("Train transform: horizontal flip, color jitter, random resized crop (single draw).")
     if config.prefer_train_classes_active:
         print(
-            f"Train subset + crop: prefer classes {config.prefer_train_images_with_classes} "
+            f"Train image subset: prefer classes {config.prefer_train_images_with_classes} "
             f"(min_rare_frac={config.prefer_train_min_rare_fraction}, "
             f"rare_crop_num_samples={config.rare_crop_num_samples})"
         )
     else:
         print(
-            "Train subset + crop: uniform subset; single random resized crop "
+            "Train image subset: uniform random to num_train "
             "(prefer_train_images_with_classes null or empty)"
         )
 
@@ -206,10 +217,16 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
 
     # Class weights & criterion
     if config.use_class_weights:
-        class_weights = _compute_class_weights(train_loader, config.num_classes, device)
-        print("\nClass weights (dampened inverse-frequency):")
-        for name, w in zip(CLASS_NAMES, class_weights):
-            print(f"  {name:<20s}  weight: {w:.3f}")
+        class_weights, class_pixel_counts = _compute_class_weights(
+            train_loader, config.num_classes, device
+        )
+        total_px = float(class_pixel_counts.sum().item())
+        print("\nClass distribution (train set, by pixel) and dampened inverse-frequency weights:")
+        for i, name in enumerate(CLASS_NAMES):
+            c = int(class_pixel_counts[i].item())
+            pct = 100.0 * c / total_px if total_px > 0 else 0.0
+            w = float(class_weights[i].item())
+            print(f"  {name:<20s}  {pct:5.2f}%  ({c:>12,} px)  |  weight: {w:.3f}")
     else:
         class_weights = None
         print("\nClass weights: disabled (uniform)")

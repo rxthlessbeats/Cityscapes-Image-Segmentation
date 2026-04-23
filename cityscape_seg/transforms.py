@@ -119,6 +119,12 @@ class PairedToTensorAndNormalize:
 
 
 def build_train_transform(config: TrainConfig) -> PairedCompose:
+    """Train transform: val-style, prefer-RRC-only, or full augment, depending on config.
+
+    - ``augment_train`` off and no prefer list → same as :func:`build_val_transform` (no on-the-fly RRC).
+    - ``augment_train`` off and prefer list set → RRC (with best-of-N) + normalize only (no flip/jitter).
+    - ``augment_train`` on → horizontal flip, color jitter, RRC, normalize.
+    """
     label_remap = build_label_remap()
     use_prefer = config.prefer_train_classes_active
     prefer_tuple = (
@@ -127,18 +133,25 @@ def build_train_transform(config: TrainConfig) -> PairedCompose:
         else ()
     )
     crop_samples = config.rare_crop_num_samples if use_prefer else 1
+    rrc = PairedRandomResizedCrop(
+        size=config.img_size,
+        scale=(0.5, 1.0),
+        label_remap=label_remap,
+        prefer_classes=prefer_tuple,
+        num_samples=crop_samples,
+    )
+    to_tensor = PairedToTensorAndNormalize()
+
+    if not config.augment_train and not use_prefer:
+        return build_val_transform()
+    if not config.augment_train and use_prefer:
+        return PairedCompose([rrc, to_tensor])
     return PairedCompose(
         [
             PairedRandomHorizontalFlip(p=0.5),
             PairedColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
-            PairedRandomResizedCrop(
-                size=config.img_size,
-                scale=(0.5, 1.0),
-                label_remap=label_remap,
-                prefer_classes=prefer_tuple,
-                num_samples=crop_samples,
-            ),
-            PairedToTensorAndNormalize(),
+            rrc,
+            to_tensor,
         ]
     )
 

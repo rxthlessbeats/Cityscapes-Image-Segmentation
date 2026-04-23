@@ -30,7 +30,7 @@ def _subsample_pairs_preferring_classes(
     prefer_arr = np.asarray(prefer_classes, dtype=np.int64)
     eligible_idx: list[int] = []
     for i, (_, lp) in enumerate(
-        tqdm(pairs, desc="Scanning labels (subset selection)", unit="img", leave=False)
+        tqdm(pairs, desc="Scanning labels (subset selection)", unit="img", leave=True)
     ):
         lbl = Image.open(lp)
         lbl = TF.resize(lbl, img_size, interpolation=TF.InterpolationMode.NEAREST)
