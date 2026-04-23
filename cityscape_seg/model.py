@@ -27,6 +27,31 @@ class ConvBlock(nn.Module):
         return self.block(x)
 
 
+class ResConvBlock(nn.Module):
+    """N consecutive (Conv3x3 -> BN -> ReLU) layers with a residual shortcut.
+
+    ReLU is applied after the addition (post-activation, ResNet style).
+    A 1×1 projection is used on the shortcut when in_ch != out_ch.
+    """
+
+    def __init__(self, in_ch: int, out_ch: int, n_convs: int = 2) -> None:
+        super().__init__()
+        layers: list[nn.Module] = []
+        for i in range(n_convs):
+            layers.append(nn.Conv2d(in_ch if i == 0 else out_ch, out_ch, 3, padding=1, bias=False))
+            layers.append(nn.BatchNorm2d(out_ch))
+            if i < n_convs - 1:
+                layers.append(nn.ReLU(inplace=True))
+        self.block = nn.Sequential(*layers)
+        self.shortcut = (
+            nn.Conv2d(in_ch, out_ch, 1, bias=False) if in_ch != out_ch else nn.Identity()
+        )
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        return self.relu(self.block(x) + self.shortcut(x))
+
+
 class FCN8s(nn.Module):
     """FCN-8s (Long et al., 2015) built from scratch.
 
@@ -224,11 +249,11 @@ class ASPP(nn.Module):
                     nn.ReLU(inplace=True),
                 )
             )
-        # Image-level features (global average pooling; no BN -- spatial size is 1x1)
         modules.append(
             nn.Sequential(
                 nn.AdaptiveAvgPool2d(1),
-                nn.Conv2d(in_ch, out_ch, 1),
+                nn.Conv2d(in_ch, out_ch, 1, bias=False),
+                nn.BatchNorm2d(out_ch),
                 nn.ReLU(inplace=True),
             )
         )
@@ -255,38 +280,56 @@ class ASPP(nn.Module):
 class DeepLabV3Plus(nn.Module):
     """DeepLabV3+ (Chen et al., 2018) built from scratch.
 
-    Encoder : 4 VGG-style stages (ConvBlock + MaxPool), output stride 16
+    Encoder : 4 residual stages (ResConvBlock + MaxPool), output stride 8
     ASPP    : multi-scale context at the encoder output
-    Decoder : low-level skip from stage 1 (stride 4), refine + upsample
+    Decoder : two low-level skips from stage 3 (stride 4) and stage 2 (stride 2),
+              with two refine blocks for progressive upsampling
     """
 
     def __init__(self, num_classes: int, base_ch: int = 16) -> None:
         super().__init__()
-        self.enc1 = ConvBlock(3, base_ch, n_convs=2)
-        self.enc2 = ConvBlock(base_ch, base_ch * 2, n_convs=2)
-        self.enc3 = ConvBlock(base_ch * 2, base_ch * 4, n_convs=3)
-        self.enc4 = ConvBlock(base_ch * 4, base_ch * 8, n_convs=3)
+        self.enc1 = ResConvBlock(3, base_ch, n_convs=2)
+        self.enc2 = ResConvBlock(base_ch, base_ch * 2, n_convs=2)
+        self.enc3 = ResConvBlock(base_ch * 2, base_ch * 4, n_convs=3)
+        self.enc4 = ResConvBlock(base_ch * 4, base_ch * 8, n_convs=3)
         self.pool = nn.MaxPool2d(2)
 
-        aspp_out_ch = 256
-        self.aspp = ASPP(base_ch * 8, out_ch=aspp_out_ch)
+        aspp_out_ch = base_ch * 16
+        low_proj_ch = base_ch * 3
+        low_proj2_ch = base_ch * 2
+        refine_ch = base_ch * 16
+        refine2_ch = base_ch * 8
+        self.aspp = ASPP(base_ch * 8, out_ch=aspp_out_ch, rates=(2, 4, 6))
 
         self.low_level_proj = nn.Sequential(
-            nn.Conv2d(base_ch, 48, 1, bias=False),
-            nn.BatchNorm2d(48),
+            nn.Conv2d(base_ch * 4, low_proj_ch, 1, bias=False),
+            nn.BatchNorm2d(low_proj_ch),
             nn.ReLU(inplace=True),
         )
         self.refine = nn.Sequential(
-            nn.Conv2d(aspp_out_ch + 48, 256, 3, padding=1, bias=False),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.5),
-            nn.Conv2d(256, 256, 3, padding=1, bias=False),
-            nn.BatchNorm2d(256),
+            nn.Conv2d(aspp_out_ch + low_proj_ch, refine_ch, 3, padding=1, bias=False),
+            nn.BatchNorm2d(refine_ch),
             nn.ReLU(inplace=True),
             nn.Dropout(0.1),
+            nn.Conv2d(refine_ch, refine_ch, 3, padding=1, bias=False),
+            nn.BatchNorm2d(refine_ch),
+            nn.ReLU(inplace=True),
         )
-        self.head = nn.Conv2d(256, num_classes, 1)
+        self.low_level_proj2 = nn.Sequential(
+            nn.Conv2d(base_ch * 2, low_proj2_ch, 1, bias=False),
+            nn.BatchNorm2d(low_proj2_ch),
+            nn.ReLU(inplace=True),
+        )
+        self.refine2 = nn.Sequential(
+            nn.Conv2d(refine_ch + low_proj2_ch, refine2_ch, 3, padding=1, bias=False),
+            nn.BatchNorm2d(refine2_ch),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.1),
+            nn.Conv2d(refine2_ch, refine2_ch, 3, padding=1, bias=False),
+            nn.BatchNorm2d(refine2_ch),
+            nn.ReLU(inplace=True),
+        )
+        self.head = nn.Conv2d(refine2_ch, num_classes, 1)
 
         self._init_weights()
 
@@ -307,19 +350,22 @@ class DeepLabV3Plus(nn.Module):
         e2 = self.enc2(self.pool(e1))
         e3 = self.enc3(self.pool(e2))
         e4 = self.enc4(self.pool(e3))
-        deep = self.pool(e4)
 
-        aspp_out = self.aspp(deep)
+        aspp_out = self.aspp(e4)
 
-        low_level = self.low_level_proj(self.pool(e1))
-
+        low_level = self.low_level_proj(e3)
         aspp_up = nn.functional.interpolate(
             aspp_out, size=low_level.shape[2:], mode="bilinear", align_corners=False
         )
-        fused = torch.cat([aspp_up, low_level], dim=1)
-        refined = self.refine(fused)
+        refined = self.refine(torch.cat([aspp_up, low_level], dim=1))
 
-        out = self.head(refined)
+        low_level2 = self.low_level_proj2(e2)
+        refined_up = nn.functional.interpolate(
+            refined, size=low_level2.shape[2:], mode="bilinear", align_corners=False
+        )
+        refined2 = self.refine2(torch.cat([refined_up, low_level2], dim=1))
+
+        out = self.head(refined2)
         out = nn.functional.interpolate(out, size=(h, w), mode="bilinear", align_corners=False)
         return out
 

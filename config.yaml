@@ -1,6 +1,6 @@
 # Training hyperparameters (loaded by TrainConfig)
-model_name: fcn8s         # registered model name (see model.py MODEL_REGISTRY)
-base_ch: 16               # encoder width for fcn8s, unet, deeplabv3plus
+model_name: deeplabv3plus         # registered model name (see model.py MODEL_REGISTRY)
+base_ch: 24               # encoder width for fcn8s, unet, deeplabv3plus
 img_height: 128
 img_width: 128
 batch_size: 8
@@ -8,21 +8,21 @@ num_classes: 8
 num_epochs: 100
 lr: 1e-3
 weight_decay: 0.001
-num_train: 2000 # full 2975 training samples
-num_val: 500 # full 500 validation samples
+num_train: 1000 # full 2975 training samples
+num_val: 250 # full 500 validation samples
 seed: 42
 loss_type: focal  # or "focal"
 focal_gamma: 2.0
 use_amp: true              # mixed-precision training (float16 on CUDA)
 # false: tensor+norm only, unless prefer_train_images_with_classes is set (then RRC+best-of-N, no flip/jitter)
-augment_train: True
+augment_train: false
 use_class_weights: false   # false to disable inverse-frequency class weighting
 lr_scheduler: plateau       # "none" or "plateau" (ReduceLROnPlateau on val loss)
-plateau_patience: 3
+plateau_patience: 5
 plateau_factor: 0.5
 plateau_min_lr: 1e-5
 load_best_checkpoint: true   # restore lowest-val-loss weights before eval / TensorBoard
-early_stopping_patience: 10    # 0 = train for full num_epochs; else stop if val loss does not improve this many times in a row
+early_stopping_patience: 15  # 0 = train for full num_epochs; else stop if val loss does not improve this many times in a row
 
 # Train subset + crop: prefer remapped classes (e.g. human + traffic). null or [] = uniform subset + single RRC.
 prefer_train_images_with_classes: [] # [2, 4]
