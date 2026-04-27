@@ -51,8 +51,8 @@ class PairedRandomResizedCrop:
     def __init__(
         self,
         size,
-        scale=(0.5, 1.0),
-        ratio=(0.75, 1.33),
+        scale=(0.8, 1.0),
+        ratio=(0.9, 1.11),
         label_remap: np.ndarray | None = None,
         prefer_classes: tuple[int, ...] = (),
         num_samples: int = 1,

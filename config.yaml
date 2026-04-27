@@ -1,15 +1,15 @@
 # Training hyperparameters (loaded by TrainConfig)
-model_name: deeplabv3plus         # registered model name (see model.py MODEL_REGISTRY)
-base_ch: 24               # encoder width for fcn8s, unet, deeplabv3plus
-img_height: 128
-img_width: 128
+model_name: fcn8s        # registered model name (see model.py MODEL_REGISTRY)
+base_ch: 48              # encoder width for fcn8s, unet, deeplabv3plus
+img_height: 256
+img_width: 512
 batch_size: 8
 num_classes: 8
 num_epochs: 100
 lr: 1e-3
 weight_decay: 0.001
-num_train: 1000 # full 2975 training samples
-num_val: 250 # full 500 validation samples
+num_train: 2975 # full 2975 training samples
+num_val: 500 # full 500 validation samples
 seed: 42
 loss_type: focal  # or "focal"
 focal_gamma: 2.0

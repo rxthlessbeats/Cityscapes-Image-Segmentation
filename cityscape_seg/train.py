@@ -289,64 +289,73 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
     no_improve_epochs = 0
 
     epoch_bar = tqdm(range(1, config.num_epochs + 1), desc="Epochs")
-    for epoch in epoch_bar:
-        t_loss, t_acc = train_one_epoch(
-            model,
-            train_loader,
-            criterion,
-            optimizer,
-            device,
-            config.loss_type,
-            scaler=scaler,
-        )
-        v_loss, v_acc = validate(
-            model,
-            val_loader,
-            criterion,
-            device,
-            config.loss_type,
-            use_amp=use_amp,
-        )
-
-        train_losses.append(t_loss)
-        train_accs.append(t_acc)
-        val_losses.append(v_loss)
-        val_accs.append(v_acc)
-
-        writer.add_scalars("Loss", {"train": t_loss, "val": v_loss}, epoch)
-        writer.add_scalars("Accuracy", {"train": t_acc, "val": v_acc}, epoch)
-        writer.add_scalar("LR", optimizer.param_groups[0]["lr"], epoch)
-
-        if v_loss < best_val_loss:
-            best_val_loss = v_loss
-            best_val_acc = v_acc
-            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
-            if config.early_stopping_patience > 0:
-                no_improve_epochs = 0
-        elif config.early_stopping_patience > 0:
-            no_improve_epochs += 1
-
-        if scheduler is not None:
-            scheduler.step(v_loss)
-
-        lr_now = optimizer.param_groups[0]["lr"]
-        epoch_bar.set_postfix(
-            t_loss=f"{t_loss:.4f}",
-            t_acc=f"{t_acc:.4f}",
-            v_loss=f"{v_loss:.4f}",
-            v_acc=f"{v_acc:.4f}",
-            lr=f"{lr_now:.2e}",
-        )
-
-        if (
-            config.early_stopping_patience > 0
-            and no_improve_epochs >= config.early_stopping_patience
-        ):
-            print(
-                f"\nEarly stopping at epoch {epoch} "
-                f"(val loss did not improve vs best for {config.early_stopping_patience} consecutive epochs)"
+    try:
+        for epoch in epoch_bar:
+            t_loss, t_acc = train_one_epoch(
+                model,
+                train_loader,
+                criterion,
+                optimizer,
+                device,
+                config.loss_type,
+                scaler=scaler,
             )
-            break
+            v_loss, v_acc = validate(
+                model,
+                val_loader,
+                criterion,
+                device,
+                config.loss_type,
+                use_amp=use_amp,
+            )
+
+            train_losses.append(t_loss)
+            train_accs.append(t_acc)
+            val_losses.append(v_loss)
+            val_accs.append(v_acc)
+
+            writer.add_scalars("Loss", {"train": t_loss, "val": v_loss}, epoch)
+            writer.add_scalars("Accuracy", {"train": t_acc, "val": v_acc}, epoch)
+            writer.add_scalar("LR", optimizer.param_groups[0]["lr"], epoch)
+            writer.flush()
+
+            if v_loss < best_val_loss:
+                best_val_loss = v_loss
+                best_val_acc = v_acc
+                best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+                if config.early_stopping_patience > 0:
+                    no_improve_epochs = 0
+            elif config.early_stopping_patience > 0:
+                no_improve_epochs += 1
+
+            if scheduler is not None:
+                scheduler.step(v_loss)
+
+            lr_now = optimizer.param_groups[0]["lr"]
+            epoch_bar.set_postfix(
+                t_loss=f"{t_loss:.4f}",
+                t_acc=f"{t_acc:.4f}",
+                v_loss=f"{v_loss:.4f}",
+                v_acc=f"{v_acc:.4f}",
+                lr=f"{lr_now:.2e}",
+            )
+
+            if (
+                config.early_stopping_patience > 0
+                and no_improve_epochs >= config.early_stopping_patience
+            ):
+                print(
+                    f"\nEarly stopping at epoch {epoch} "
+                    f"(val loss did not improve vs best for {config.early_stopping_patience} consecutive epochs)"
+                )
+                break
+    except BaseException as e:
+        print(
+            f"\nTraining interrupted by {type(e).__name__}: {e}. "
+            "Flushing TensorBoard writer to preserve partial curves."
+        )
+        writer.flush()
+        raise
 
     final_epoch = len(train_losses)
     print(
