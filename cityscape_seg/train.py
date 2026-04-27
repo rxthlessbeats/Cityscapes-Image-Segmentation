@@ -109,6 +109,35 @@ def _make_run_name(config: TrainConfig) -> str:
     return f"{ts}_{config.model_name}_bs{config.batch_size}_lr{config.lr:.0e}_{config.loss_type}"
 
 
+def _save_best_checkpoint(
+    path: Path,
+    model_state: dict[str, torch.Tensor],
+    config: TrainConfig,
+    epoch: int,
+    best_val_loss: float,
+    best_val_acc: float,
+) -> None:
+    """Atomically write the best-so-far weights plus the metadata needed to rebuild the model.
+
+    The checkpoint is a self-contained dict: ``evaluate`` can reconstruct the architecture
+    without the original ``config.yaml``.
+    """
+    payload = {
+        "model_state_dict": model_state,
+        "model_name": config.model_name,
+        "base_ch": config.base_ch,
+        "num_classes": config.num_classes,
+        "img_height": config.img_height,
+        "img_width": config.img_width,
+        "epoch": epoch,
+        "best_val_loss": best_val_loss,
+        "best_val_acc": best_val_acc,
+    }
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    torch.save(payload, tmp)
+    tmp.replace(path)
+
+
 def _log_predictions(
     writer: SummaryWriter,
     model: nn.Module,
@@ -323,6 +352,14 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
                 best_val_loss = v_loss
                 best_val_acc = v_acc
                 best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+                _save_best_checkpoint(
+                    log_path / "best.pth",
+                    best_state,
+                    config,
+                    epoch,
+                    best_val_loss,
+                    best_val_acc,
+                )
                 if config.early_stopping_patience > 0:
                     no_improve_epochs = 0
             elif config.early_stopping_patience > 0:
@@ -414,6 +451,8 @@ def run_training(config: TrainConfig, settings: Settings) -> None:
 
     writer.close()
     print(f"TensorBoard logs saved to {log_path}")
+    if best_state is not None:
+        print(f"Best checkpoint saved to {log_path / 'best.pth'}")
 
 
 def _plot_curves(

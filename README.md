@@ -160,6 +160,24 @@ To use a custom config file:
 python -m cityscape_seg train --config config.yaml
 ```
 
+Each run writes its TensorBoard events **and** a `best.pth` checkpoint into a timestamped subdirectory of `runs/` (see [Checkpoints](#checkpoints) below).
+
+### Evaluate a saved checkpoint
+
+Once training has produced a `best.pth`, run mIoU on the validation split without retraining:
+
+```bash
+python -m cityscape_seg evaluate --checkpoint runs/<run-name>/best.pth
+```
+
+Optional flags:
+
+- `--num-val N` -- number of validation samples (default: 100)
+- `--batch-size N` -- evaluation batch size (default: 4)
+- `--show-predictions` -- pop a matplotlib window with input / ground-truth / prediction grids
+
+The checkpoint is self-describing (it carries `model_name`, `base_ch`, `num_classes`, and image size), so no `config.yaml` is required to reload it.
+
 ### Use the notebook
 
 Open `notebooks/base.ipynb` in Jupyter or VS Code. The first cell adds the project root to `sys.path` so all package imports work without installation.
@@ -178,6 +196,22 @@ tensorboard --logdir runs
 - **Per-class IoU and mIoU** -- logged at the end of training
 - **Prediction images** -- input / ground-truth / prediction grid
 - **Hyperparameters** -- batch size, lr, weight decay, loss type, etc. (viewable in the HParams tab for comparing runs)
+
+### Checkpoints
+
+Whenever validation loss improves, the trainer atomically writes the corresponding weights to:
+
+```
+runs/<run-name>/best.pth
+```
+
+The file is a plain `torch.save` dict containing:
+
+- `model_state_dict` -- the weights themselves
+- `model_name`, `base_ch`, `num_classes`, `img_height`, `img_width` -- everything needed to rebuild the architecture
+- `epoch`, `best_val_loss`, `best_val_acc` -- diagnostic fields
+
+Because each improvement overwrites the same file, an interrupted or early-stopped run still leaves the best weights on disk. Pass the path to `python -m cityscape_seg evaluate --checkpoint ...` to reload it.
 
 ## 8-Class Label Scheme
 

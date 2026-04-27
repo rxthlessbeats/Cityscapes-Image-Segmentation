@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 
+from .config import Settings, TrainConfig
+from .dataset import CityscapesSegDataset
 from .labels import CLASS_COLORS, CLASS_NAMES
+from .model import build_model
+from .transforms import build_val_transform
 from .utils import inv_normalize, label_to_color
 
 
@@ -90,3 +98,94 @@ def visualize_predictions(
     fig.legend(handles=patches, loc="lower center", ncol=num_classes, fontsize=10)
     plt.tight_layout(rect=[0, 0.04, 1, 1])
     plt.show()
+
+
+def run_evaluation(
+    checkpoint_path: Path,
+    settings: Settings,
+    num_val: int = 100,
+    batch_size: int = 4,
+    show_predictions: bool = False,
+) -> dict[str, Any]:
+    """Load a checkpoint produced by ``train.run_training`` and report mIoU on the val split.
+
+    The checkpoint is self-describing — it carries ``model_name``, ``base_ch``, ``num_classes``,
+    and image size — so no YAML config is required.
+    """
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+
+    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    required = {
+        "model_state_dict",
+        "model_name",
+        "base_ch",
+        "num_classes",
+        "img_height",
+        "img_width",
+    }
+    missing = required - set(ckpt)
+    if missing:
+        raise ValueError(
+            f"Checkpoint at {checkpoint_path} is missing required keys: {sorted(missing)}. "
+            "Was it produced by a recent run of `train`?"
+        )
+
+    cfg = TrainConfig(
+        model_name=ckpt["model_name"],
+        base_ch=ckpt["base_ch"],
+        num_classes=ckpt["num_classes"],
+        img_height=ckpt["img_height"],
+        img_width=ckpt["img_width"],
+        num_val=num_val,
+        batch_size=batch_size,
+    )
+
+    device = torch.device(settings.device)
+    use_amp = device.type == "cuda"
+
+    model = build_model(cfg).to(device)
+    model.load_state_dict(ckpt["model_state_dict"])
+    model.eval()
+    print(
+        f"Loaded {cfg.model_name} (base_ch={cfg.base_ch}, num_classes={cfg.num_classes}, "
+        f"img={cfg.img_height}x{cfg.img_width}) from {checkpoint_path}"
+    )
+    if "epoch" in ckpt and "best_val_loss" in ckpt:
+        print(
+            f"  trained {ckpt['epoch']} epoch(s), "
+            f"best_val_loss={ckpt['best_val_loss']:.4f}, "
+            f"best_val_acc={ckpt.get('best_val_acc', float('nan')):.4f}"
+        )
+
+    val_ds = CityscapesSegDataset(
+        settings.data_root,
+        "valid",
+        img_size=cfg.img_size,
+        transform=build_val_transform(),
+        max_samples=num_val,
+        seed=42,
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=settings.num_workers,
+        pin_memory=settings.pin_memory,
+    )
+    print(f"Val: {len(val_ds)} samples ({len(val_loader)} batches)")
+
+    ious = compute_miou(model, val_loader, cfg.num_classes, device, use_amp=use_amp)
+    print_miou_report(ious)
+    miou = float(np.mean(ious))
+
+    if show_predictions:
+        visualize_predictions(model, val_ds, device, use_amp=use_amp)
+
+    return {
+        "ious": ious,
+        "mIoU": miou,
+        "epoch": ckpt.get("epoch"),
+        "best_val_loss": ckpt.get("best_val_loss"),
+        "best_val_acc": ckpt.get("best_val_acc"),
+    }
